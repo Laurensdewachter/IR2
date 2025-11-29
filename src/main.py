@@ -1,16 +1,17 @@
-import argparse
-import gensim
+import os
 import nltk
+import gensim
 import zipfile
+import argparse
 
-nltk.download("punkt_tab")
+nltk.download("punkt_tab", quiet=True)
 
 
 def word2vec(data_path: str) -> gensim.models.Word2Vec:
     """
     Based on the tutorial from GeeksforGeeks (https://www.geeksforgeeks.org/python/python-word-embedding-using-word2vec/)
 
-    :param data_path: ZIP file containing text data
+    :param data_path: Zip file containing text data
     :return: Trained Word2Vec model
     """
     model = None
@@ -29,7 +30,12 @@ def word2vec(data_path: str) -> gensim.models.Word2Vec:
                 # Training the Word2Vec model
                 if not model:
                     model = gensim.models.Word2Vec(
-                        data, min_count=1, vector_size=100, window=5, workers=4, sg=1
+                        data,
+                        min_count=1,
+                        vector_size=100,
+                        window=5,
+                        workers=4,
+                        sg=1,
                     )
                 else:
                     model.train(data, total_examples=1, epochs=1)
@@ -39,8 +45,19 @@ def word2vec(data_path: str) -> gensim.models.Word2Vec:
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument(
-        "--train", "-t", type=str, help="Path to the data zip file to train on"
+        "--training_data", "-t", type=str, help="Path to the data zip file to train on"
     )
+    arg_parser.add_argument("--model", "-m", type=str, help="Path to a trained model")
     args = arg_parser.parse_args()
 
-    word2vec(args.train).save("word2vec.model")
+    if args.training_data:
+        print(
+            f"Training Word2Vec model on {os.path.splitext(args.training_data)[0]} zip-file..."
+        )
+        word2vec(args.training_data).save(
+            f"{os.path.splitext(args.training_data)[0]}.model"
+        )
+
+    if args.model:
+        print(f"Loading Word2Vec model from {args.model}...")
+        model = gensim.models.Word2Vec.load(args.model)
