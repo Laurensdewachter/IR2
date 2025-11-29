@@ -8,4 +8,5 @@ dependencies = [
     "black==25.9.0",
     "gensim>=4.4.0",
     "nltk>=3.9.2",
+    "scikit-learn>=1.7.2",
 ]
