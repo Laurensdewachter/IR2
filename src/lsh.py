@@ -6,6 +6,8 @@ import pandas as pd
 from pathlib import Path
 
 
+from sklearn.metrics.pairwise import cosine_similarity
+
 DATA_DIR = Path.cwd().parent / "data"
 
 # lshash: Locality Sensitive Hashing in Python
@@ -161,15 +163,71 @@ class lsh(object):
 
 
 
+def ground_truth_top_k(query_vecs, embeddings, k=10):
+    sims = cosine_similarity(query_vecs, embeddings)
+    return np.argsort(-sims, axis=1)[:, :k]
+
+def lsh_top_k(query_vecs, LSH, k=10, distance_func="euclidean"):
+    lsh_results = []
+    for q in query_vecs:
+        res = LSH.query(q, num_results=k, distance_func=distance_func)
+        retrieved_ids = [doc_id for (doc_id, _), dist in res]
+        retrieved_ids = (retrieved_ids + [-1]*k)[:k]
+        lsh_results.append(retrieved_ids)
+    return np.array(lsh_results)
+
+def precision_recall_at_k(gt, pred, k=10):
+    precisions = []
+    recalls = []
+    for g, p in zip(gt, pred):
+        g_set = set(g[:k])
+        p_set = set(p[:k])
+        intersection = len(g_set & p_set)
+        precisions.append(intersection / k)
+        recalls.append(intersection / len(g_set))
+    return np.mean(precisions), np.mean(recalls)
+
+# --- Grid search ---
+def evaluate_lsh_grid(query_vecs, embeddings, hash_sizes, num_tables_list, distance_funcs, k=10):
+    results = []
+    for hs in hash_sizes:
+        for nt in num_tables_list:
+            for dist in distance_funcs:
+                print(f"Evaluating hash_size={hs}, num_tables={nt}, distance_func={dist}")
+                L = lsh(hash_size=hs, input_dim=embeddings.shape[1], num_hashtables=nt, storage_config={'dict': None})
+                for idx, vec in enumerate(embeddings):
+                    L.index((idx, vec))
+                gt = ground_truth_top_k(query_vecs, embeddings, k=k)
+                pred = lsh_top_k(query_vecs, L, k=k, distance_func=dist)
+                p, r = precision_recall_at_k(gt, pred, k=k)
+                results.append({
+                    "hash_size": hs,
+                    "num_tables": nt,
+                    "distance_func": dist,
+                    "precision@10": p,
+                    "recall@10": r
+                })
+                print(f"  Precision@{k}: {p:.4f}, Recall@{k}: {r:.4f}\n")
+    return results
+
+
 if __name__ == "__main__":
     embedder = SentenceEmbedder()
     df_corpus, embeddings = embedder.encode_corpus()
-    LSH = lsh(16, embeddings.shape[1], num_hashtables=10, storage_config={'dict': None})
-    for idx, vec in enumerate(embeddings):
-        LSH.index((idx, vec))
     
-    query = embeddings[9645] # document 9645
+    print(embeddings.shape) 
+    
+    query_vecs = embeddings[10000:10100]  # 100 queries
 
-    results = LSH.query(query, num_results=5, distance_func="l1norm")
-    for (doc_id, _), dist in results:
-        print(df_corpus.loc[doc_id, "plot"])
+    # --- Grid search hyperparameters ---
+    hash_sizes = [16, 20, 22, 24]
+    num_tables_list = [5, 10, 15]
+    distance_funcs = ["cosine", "euclidean", "hamming"]
+
+    grid_results = evaluate_lsh_grid(query_vecs, embeddings, hash_sizes, num_tables_list, distance_funcs, k=10)
+    
+    # Convert results to DataFrame for easy analysis
+    df_results = pd.DataFrame(grid_results)
+    print(df_results.sort_values(by="precision@10", ascending=False))
+
+    
