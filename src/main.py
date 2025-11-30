@@ -4,6 +4,10 @@ import gensim
 import zipfile
 import argparse
 import numpy as np
+from tqdm import tqdm
+from annoy import AnnoyIndex
+import time
+from lsh import lsh
 
 from sklearn.cluster import KMeans
 
@@ -76,6 +80,11 @@ if __name__ == "__main__":
     arg_parser.add_argument(
         "--quantize", "-q", action="store_true", help="Enable model quantization"
     )
+
+    arg_parser.add_argument("--annoy", action="store_true", help="Enable Annoy indexing")
+
+    arg_parser.add_argument("--lsh", action="store_true", help="Enable LSH indexing",)
+
     args = arg_parser.parse_args()
 
     model = None
@@ -97,3 +106,57 @@ if __name__ == "__main__":
             raise ValueError("Model path must be provided for quantization.")
         print("Quantizing the model...")
         quantize_model(model)
+
+    if args.lsh:
+        if not model:
+            raise ValueError("No model loaded for LSH indexing")
+        lsh_index = lsh(hash_size=16, input_dim=model.wv.vectors.shape[1], num_hashtables=15, storage_config={'dict': None})
+        
+        start_time = time.time()
+        for idx, vec in tqdm(enumerate(model.wv.vectors)):
+            lsh_index.index((idx, vec))
+        end_time = time.time()
+        print(f"LSH indexing completed in {end_time - start_time:.2f} seconds.")
+
+        print("Querying LSH...")
+        query_vec = model.wv.vectors[0]
+
+        start_time = time.time()
+        results = lsh_index.query(query_vec, num_results=5, distance_func="euclidean")
+        end_time = time.time()
+        print(f"LSH query time: {end_time - start_time:.6f} seconds")
+
+        print("Top 5 results (doc_id, distance):")
+        for (doc_id, _), dist in results:
+            print(f"Doc ID: {doc_id}, Distance: {dist}")
+
+
+    if args.annoy:
+        if not model:
+            raise ValueError("No model loaded for Annoy indexing.")
+        length = model.wv.vectors.shape[1]
+        t = AnnoyIndex(length, 'angular')
+        
+        start_time = time.time()
+        for i in tqdm(range(len(model.wv.vectors))):
+            t.add_item(i, model.wv.vectors[i])
+        t.build(10)
+        t.save('annoy.ann')
+        end_time = time.time()
+        print(f"Annoy indexing completed in {end_time - start_time:.2f} seconds.")
+
+        print("Querying Annoy...")
+        u = AnnoyIndex(length, 'angular')
+        u.load('annoy.ann')
+        query_vec = model.wv.vectors[0]
+
+        start_time = time.time()
+        indices = u.get_nns_by_vector(query_vec, 5, include_distances=True)
+        end_time = time.time()
+        print(f"Annoy query time: {end_time - start_time:.6f} seconds")
+
+        print("Top 5 results (doc_id, distance):")
+        for doc_id, dist in zip(*indices):
+            print(f"Doc ID: {doc_id}, Distance: {dist}")
+
+            
